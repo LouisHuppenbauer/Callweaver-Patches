@@ -1,0 +1,356 @@
+diff -crB callweaver/apps/app_dial.c callweaver.to.patch/apps/app_dial.c
+*** callweaver/apps/app_dial.c	2011-07-18 10:45:27.603965011 +0200
+--- callweaver.to.patch/apps/app_dial.c	2011-07-18 11:10:53.465964956 +0200
+***************
+*** 187,200 ****
+  
+  LOCAL_USER_DECL;
+  
+! static void hanguptree(struct localuser *outgoing, struct cw_channel *exception)
+  {
+  	/* Hang up a tree of stuff */
+  	struct localuser *oo;
+  	while (outgoing) {
+  		/* Hangup any existing lines we have open */
+! 		if (outgoing->chan && (outgoing->chan != exception))
+  			cw_hangup(outgoing->chan);
+  		oo = outgoing;
+  		outgoing=outgoing->next;
+  		free(oo);
+--- 187,207 ----
+  
+  LOCAL_USER_DECL;
+  
+! static void hanguptree(struct localuser *outgoing, struct cw_channel *exception, int answered_elsewhere)
+  {
+  	/* Hang up a tree of stuff */
+  	struct localuser *oo;
+  	while (outgoing) {
+  		/* Hangup any existing lines we have open */
+! 		if (outgoing->chan && (outgoing->chan != exception)) {
+! 			if(answered_elsewhere) {
+!                                 /* The flag is used for local channel inheritance and stuff */
+! 				cw_set_flag(outgoing->chan, CW_FLAG_ANSWERED_ELSEWHERE);
+! 				/* This is for the channel drivers */
+! 				outgoing->chan->hangupcause = CW_CAUSE_ANSWERED_ELSEWHERE;			
+! 			}
+  			cw_hangup(outgoing->chan);
++ 		}
+  		oo = outgoing;
+  		outgoing=outgoing->next;
+  		free(oo);
+***************
+*** 1192,1197 ****
+--- 1199,1209 ----
+  		if (outbound_group)
+  			cw_app_group_set_channel(tmp->chan, outbound_group);
+  
++                 /* If the calling channel has the ANSWERED_ELSEWHERE flag set, inherit it. This is to support local channels */
++                 if (cw_test_flag(chan, CW_FLAG_ANSWERED_ELSEWHERE))
++                         cw_set_flag(tmp->chan, CW_FLAG_ANSWERED_ELSEWHERE);
++ 
++ 
+  		/* Place the call, but don't wait on the answer */
+  		res = cw_call(tmp->chan, numsubst, 0);
+  
+***************
+*** 1276,1282 ****
+  		/* Ah ha!  Someone answered within the desired timeframe.  Of course after this
+  		   we will always return with -1 so that it is hung up properly after the 
+  		   conversation.  */
+! 		hanguptree(outgoing, peer);
+  		outgoing = NULL;
+  		/* If appropriate, log that we have a destination channel */
+  		if (chan->cdr)
+--- 1288,1294 ----
+  		/* Ah ha!  Someone answered within the desired timeframe.  Of course after this
+  		   we will always return with -1 so that it is hung up properly after the 
+  		   conversation.  */
+! 		hanguptree(outgoing, peer, 1);
+  		outgoing = NULL;
+  		/* If appropriate, log that we have a destination channel */
+  		if (chan->cdr)
+***************
+*** 1509,1515 ****
+  			cw_parseable_goto(peer, dblgoto);
+  			peer->priority++;
+  			cw_pbx_start(peer);
+! 			hanguptree(outgoing, NULL);
+  			LOCAL_USER_REMOVE(u);
+  			return 0;
+  		}
+--- 1521,1527 ----
+  			cw_parseable_goto(peer, dblgoto);
+  			peer->priority++;
+  			cw_pbx_start(peer);
+! 			hanguptree(outgoing, NULL, 0);
+  			LOCAL_USER_REMOVE(u);
+  			return 0;
+  		}
+***************
+*** 1670,1676 ****
+  		sentringing = 0;
+  		cw_indicate(chan, -1);
+  	}
+! 	hanguptree(outgoing, NULL);
+  	pbx_builtin_setvar_helper(chan, "DIALSTATUS", status);
+  	cw_log(LOG_DEBUG, "Exiting with DIALSTATUS=%s.\n", status);
+  	
+--- 1682,1688 ----
+  		sentringing = 0;
+  		cw_indicate(chan, -1);
+  	}
+! 	hanguptree(outgoing, NULL, 0);
+  	pbx_builtin_setvar_helper(chan, "DIALSTATUS", status);
+  	cw_log(LOG_DEBUG, "Exiting with DIALSTATUS=%s.\n", status);
+  	
+diff -crB callweaver/apps/app_queue.c callweaver.to.patch/apps/app_queue.c
+*** callweaver/apps/app_queue.c	2011-07-18 10:45:27.610965003 +0200
+--- callweaver.to.patch/apps/app_queue.c	2011-07-18 11:10:53.466964971 +0200
+***************
+*** 292,297 ****
+--- 292,298 ----
+      int handled;			/*!< Whether our call was handled */
+      time_t start;			/*!< When we started holding */
+      time_t expire;			/*!< When this entry should expire (time out of queue) */
++     int cancel_answered_elsewhere;         /*!< Whether we should force the CAE flag on this call (C) option*/
+      struct cw_channel *chan;	/*!< Our channel */
+      struct queue_ent *next;		/*!< The next queue entry */
+  };
+***************
+*** 1438,1452 ****
+  }
+  
+  /* Hang up a list of outgoing calls */
+! static void hangupcalls(struct localuser *outgoing, struct cw_channel *exception)
+  {
+      struct localuser *oo;
+  
+      while (outgoing)
+      {
+          /* Hangup any existing lines we have open */
+!         if (outgoing->chan && (outgoing->chan != exception))
+!             cw_hangup(outgoing->chan);
+          oo = outgoing;
+          outgoing=outgoing->next;
+          free(oo);
+--- 1439,1457 ----
+  }
+  
+  /* Hang up a list of outgoing calls */
+! static void hangupcalls(struct localuser *outgoing, struct cw_channel *exception, int cancel_answered_elsewhere)
+  {
+      struct localuser *oo;
+  
+      while (outgoing)
+      {
+          /* Hangup any existing lines we have open */
+!         if (outgoing->chan && (outgoing->chan != exception)) {
+! 		if (exception || cancel_answered_elsewhere) {
+!             		cw_set_flag(outgoing->chan, CW_FLAG_ANSWERED_ELSEWHERE);
+! 		}
+!            	cw_hangup(outgoing->chan);
+! 	}
+          oo = outgoing;
+          outgoing=outgoing->next;
+          free(oo);
+***************
+*** 1605,1610 ****
+--- 1610,1621 ----
+      else if (status != tmp->oldstatus)
+          update_dial_status(qe->parent, tmp->member, status);
+  
++ 	/*inherit the canceled_elsewhere_flag*/
++         if (qe->cancel_answered_elsewhere) {
++                 cw_set_flag(tmp->chan, CW_FLAG_ANSWERED_ELSEWHERE);
++         }
++ 
++ 
+      tmp->chan->appl = "AppQueue (Outgoing Line)";
+      tmp->chan->whentohangup = 0;
+      if (tmp->chan->cid.cid_num)
+***************
+*** 2402,2410 ****
+--- 2413,2428 ----
+              if ((now - qe->start >= qe->parent->timeout))
+                  *go_on = 1;
+              break;
++         case 'C':
++ 	        qe->cancel_answered_elsewhere = 1;
++             break;
+          }
+      }
+  
++     if (cw_test_flag(qe->chan, CW_FLAG_ANSWERED_ELSEWHERE)) {
++ 	    qe->cancel_answered_elsewhere = 1;
++     }
++ 
+      /* Hold the lock while we setup the outgoing calls */
+      if (use_weight)
+          cw_mutex_lock(&qlock);
+***************
+*** 2515,2521 ****
+          /* Update parameters for the queue */
+          recalc_holdtime(qe);
+          member = lpeer->member;
+!         hangupcalls(outgoing, peer);
+          outgoing = NULL;
+          if (announce || qe->parent->reportholdtime || qe->parent->memberdelay)
+          {
+--- 2533,2539 ----
+          /* Update parameters for the queue */
+          recalc_holdtime(qe);
+          member = lpeer->member;
+!         hangupcalls(outgoing, peer, qe->cancel_answered_elsewhere);
+          outgoing = NULL;
+          if (announce || qe->parent->reportholdtime || qe->parent->memberdelay)
+          {
+***************
+*** 2693,2699 ****
+              res = bridge; /* bridge error, stay in the queue */
+      }
+  out:
+!     hangupcalls(outgoing, NULL);
+      return res;
+  }
+  
+--- 2711,2717 ----
+              res = bridge; /* bridge error, stay in the queue */
+      }
+  out:
+!     hangupcalls(outgoing, NULL, qe->cancel_answered_elsewhere);
+      return res;
+  }
+  
+diff -crB callweaver/channels/chan_local.c callweaver.to.patch/channels/chan_local.c
+*** callweaver/channels/chan_local.c	2011-07-18 10:45:26.774964999 +0200
+--- callweaver.to.patch/channels/chan_local.c	2011-07-18 11:10:53.467964579 +0200
+***************
+*** 362,367 ****
+--- 362,372 ----
+  	strncpy(p->chan->accountcode, p->owner->accountcode, sizeof(p->chan->accountcode) - 1);
+  	p->chan->cdrflags = p->owner->cdrflags;
+  
++         /* Make sure we inherit the ANSWERED_ELSEWHERE flag if it's set on the queue/dial call request in the dialplan */
++         if (cw_test_flag(ast, CW_FLAG_ANSWERED_ELSEWHERE)) {
++ 	        cw_set_flag(p->chan, CW_FLAG_ANSWERED_ELSEWHERE);
++         }
++ 
+  	/* copy the channel variables from the incoming channel to the outgoing channel */
+  	/* Note that due to certain assumptions, they MUST be in the same order */
+  	CW_LIST_TRAVERSE(&p->owner->varshead, varptr, entries) {
+***************
+*** 425,430 ****
+--- 430,440 ----
+  
+  	cw_mutex_lock(&p->lock);
+  	isoutbound = IS_OUTBOUND(ast, p);
++  
++         if (p->chan && cw_test_flag(ast, CW_FLAG_ANSWERED_ELSEWHERE)) {
++  	       cw_set_flag(p->chan, CW_FLAG_ANSWERED_ELSEWHERE);
++         }
++ 
+  	if (isoutbound) {
+  		p->chan = NULL;
+  		p->launchedpbx = 0;
+diff -crB callweaver/channels/chan_sip.c callweaver.to.patch/channels/chan_sip.c
+*** callweaver/channels/chan_sip.c	2011-07-18 10:45:26.769964567 +0200
+--- callweaver.to.patch/channels/chan_sip.c	2011-07-18 13:05:39.264964175 +0200
+***************
+*** 740,745 ****
+--- 740,746 ----
+      int lastinvite;                /*!< Last Cseq of invite */
+      unsigned int flags;            /*!< SIP_ flags */    
+      int timer_t1;                /*!< SIP timer T1, ms rtt */
++     unsigned short answered_elsewhere:1;  /*!< This call is cancelled due to answer on another channel */
+      unsigned int sipoptions;        /*!< Supported SIP sipoptions on the other end */
+      int capability;                /*!< Special capability (codec) */
+      int jointcapability;            /*!< Supported capability at both ends (codecs ) */
+***************
+*** 3411,3416 ****
+--- 3412,3424 ----
+          cw_log(LOG_DEBUG, "Asked to hangup channel not connected\n");
+          return 0;
+      }
++ 
++     if (cw_test_flag(ast, CW_FLAG_ANSWERED_ELSEWHERE) || ast->hangupcause == CW_CAUSE_ANSWERED_ELSEWHERE) {
++             append_history(p, "Cancel", "Call answered elsewhere");
++             p->answered_elsewhere = TRUE;
++     }
++ 
++ 
+      if (option_debug)
+          cw_log(LOG_DEBUG, "Hangup call %s, SIP callid %s)\n", ast->name, p->callid);
+  
+***************
+*** 7925,7930 ****
+--- 7933,7943 ----
+  {
+      struct sip_request resp;
+      reqprep(&resp, p, sipmethod, seqno, newbranch);
++ 
++     if (sipmethod == SIP_CANCEL && p->answered_elsewhere) {
++      	add_header(&resp, "Reason", "SIP;cause=200;text=\"Call completed elsewhere\"",SIP_DL_DONTCARE);
++     }
++ 
+      add_header_contentLength(&resp, 0);
+      add_blank_header(&resp);
+      return send_request(p, &resp, reliable, seqno ? seqno : p->ocseq);
+***************
+*** 7936,7942 ****
+      struct sip_request resp;
+  
+      reqprep(&resp, p, sipmethod, seqno, newbranch);
+!     if (*p->realm)
+      {
+          char digest[1024];
+  
+--- 7949,7960 ----
+      struct sip_request resp;
+  
+      reqprep(&resp, p, sipmethod, seqno, newbranch);
+!     
+!      if (sipmethod == SIP_CANCEL && p->answered_elsewhere) {
+!      	add_header(&resp, "Reason", "SIP;cause=200;text=\"Call completed elsewhere\"",SIP_DL_DONTCARE);
+!     }
+!  
+!    if (*p->realm)
+      {
+          char digest[1024];
+  
+diff -crB callweaver/include/callweaver/causes.h callweaver.to.patch/include/callweaver/causes.h
+*** callweaver/include/callweaver/causes.h	2011-07-18 10:45:31.716964715 +0200
+--- callweaver.to.patch/include/callweaver/causes.h	2011-07-18 11:10:53.474964696 +0200
+***************
+*** 35,40 ****
+--- 35,41 ----
+  #define CW_CAUSE_NO_ANSWER				19
+  #define CW_CAUSE_CALL_REJECTED				21
+  #define CW_CAUSE_NUMBER_CHANGED			22
++ #define CW_CAUSE_ANSWERED_ELSEWHERE            	26
+  #define CW_CAUSE_NONSELECTED_USER_CLEARING		26
+  #define CW_CAUSE_DESTINATION_OUT_OF_ORDER		27
+  #define CW_CAUSE_INVALID_NUMBER_FORMAT			28
+diff -crB callweaver/include/callweaver/channel.h callweaver.to.patch/include/callweaver/channel.h
+*** callweaver/include/callweaver/channel.h	2011-07-18 10:45:31.700089345 +0200
+--- callweaver.to.patch/include/callweaver/channel.h	2011-07-18 11:10:53.474964696 +0200
+***************
+*** 396,402 ****
+  #define CW_FLAG_IN_AUTOLOOP	(1 << 9)	/* the channel is in an auto-incrementing dialplan processor,
+  						   so when ->priority is set, it will get incremented before
+  						   finding the next priority to run
+! 						*/
+  
+  #define CW_FEATURE_PLAY_WARNING	(1 << 0)
+  #define CW_FEATURE_REDIRECT		(1 << 1)
+--- 396,405 ----
+  #define CW_FLAG_IN_AUTOLOOP	(1 << 9)	/* the channel is in an auto-incrementing dialplan processor,
+  						   so when ->priority is set, it will get incremented before
+  						   finding the next priority to run
+! 					*/
+! #define CW_FLAG_ANSWERED_ELSEWHERE (1 << 10) /*! Flag to show channels that this call is hangup due to the fact that the call
+! 					           was indeed answered, but in another channel */
+! 
+  
+  #define CW_FEATURE_PLAY_WARNING	(1 << 0)
+  #define CW_FEATURE_REDIRECT		(1 << 1)

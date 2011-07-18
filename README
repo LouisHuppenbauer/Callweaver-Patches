@@ -2,10 +2,11 @@ This project will contain several callweaver-patch-files
 
 
 callweaver_answered_elsewhere.patch
-	This patch enables the Reason-header for callweaver. it will be sent together with the SIP-CANCEL to the different ringgroup-members so those won't record a ringgroup call as a missed call. 
-        Instead the phone display (at least tested on some snoms) will display "Call answered elsewhere" and just end the call without recording it as missed (As it was picked up... Just not by you)
-	You can test it by calling "patch --dry-run -p1 -i /path/to/callweaver_answered_elsewhere.patch" and then apply it with "patch --dry-run -p1 -i /path/to/callweaver_answered_elsewhere.patch".
-  
-	The patch is based on Asterisk-Revision 328161 and has been succesfully implemented in Callweaver-Revision 5717.
 
-	Please note that I cannot garantee you that it will work for you too. But if you encounter any kind of problem you can contact me anytime. 
+This patch enables the Reason-header for callweaver. it will be sent together with the SIP-CANCEL to the different ringgroup-members so those won't record a ringgroup call as a missed call. 
+Instead the phone display (at least tested on some snoms) will display "Call answered elsewhere" and just end the call without recording it as missed (As it was picked up... Just not by you)
+You can test it by calling "patch --dry-run -p1 -i /path/to/callweaver_answered_elsewhere.patch" and then apply it with "patch --dry-run -p1 -i /path/to/callweaver_answered_elsewhere.patch" as long as you are inside your callweaver's source directory.
+  
+The patch is based on Asterisk-Revision 328161 and has been succesfully implemented in Callweaver-Revision 5717.
+
+Please note that I cannot garantee you that it will work for you too. But if you encounter any kind of problem you can contact me anytime. 
